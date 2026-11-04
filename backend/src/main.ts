@@ -21,7 +21,7 @@ export async function bootstrap() {
     }),
   );
   app.useGlobalFilters(new AllExceptionsFilter());
-  app.enableCors({ origin: true, credentials: true });
+  // No CORS: the frontend reaches the API same-origin through the Next.js /api rewrite.
 
   const port = process.env.PORT ?? 4000;
   await app.listen(port);

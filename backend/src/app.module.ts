@@ -1,12 +1,10 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
-import { ServeStaticModule } from '@nestjs/serve-static';
-import { join } from 'path';
 import { PrismaModule } from './prisma/prisma.module';
-import { ClockModule } from './common/clock/clock.module';
-import { AppConfigModule } from './common/config/config.module';
+import { CommonModule } from './common/common.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ProductsModule } from './products/products.module';
@@ -21,16 +19,11 @@ import { HealthModule } from './health/health.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
+    // Generous global limit; login is tightened with @Throttle in AuthController.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 600 }]),
     ScheduleModule.forRoot(),
-    ServeStaticModule.forRoot({
-      rootPath: join(process.cwd(), 'public'),
-      serveRoot: '/public',
-      exclude: ['/api/*'],
-    }),
     PrismaModule,
-    ClockModule,
-    AppConfigModule,
+    CommonModule,
     HealthModule,
     AuthModule,
     UsersModule,
@@ -42,5 +35,6 @@ import { HealthModule } from './health/health.module';
     ReportsModule,
     NotificationsModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

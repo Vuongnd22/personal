@@ -2,7 +2,7 @@ import { Task, TaskPriority, TaskStatus } from '@prisma/client';
 import { UserRefDto, toUserRef } from '../../users/dto/user-response.dto';
 import { ProductRefDto, toProductRef } from '../../products/dto/product-response.dto';
 import { formatDateOnly } from '../../common/clock/today';
-import { isOverdue } from '../../common/progress/progress';
+import { isOverdue } from '../../common/domain';
 
 export interface ChecklistItemDto {
   id: string;
@@ -39,12 +39,12 @@ export type TaskFull = Task & {
   assignee: Parameters<typeof toUserRef>[0] | null;
   creator: Parameters<typeof toUserRef>[0];
   feature: { id: string; name: string; category: string; product: Parameters<typeof toProductRef>[0] };
-  checklistItems: { done: boolean }[];
+  checklistItems: { id: string; title: string; done: boolean; sortOrder: number }[];
   _count: { comments: number; attachments: number };
 };
 
 export function toTaskDto(task: TaskFull, today: string): TaskDto {
-  const overdue = isOverdue(task.status, task.deadline, today);
+  const overdue = isOverdue(task.status, formatDateOnly(task.deadline), today);
   const total = task.checklistItems.length;
   const done = task.checklistItems.filter((c) => c.done).length;
   return {
@@ -72,9 +72,7 @@ export function toTaskDto(task: TaskFull, today: string): TaskDto {
   };
 }
 
-export type TaskDetailFull = TaskFull & {
-  checklistItems: { id: string; title: string; done: boolean; sortOrder: number }[];
-};
+export type TaskDetailFull = TaskFull;
 
 export function toTaskDetailDto(task: TaskDetailFull, today: string): TaskDto & { checklistItems: ChecklistItemDto[] } {
   return {

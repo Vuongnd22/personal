@@ -1,5 +1,5 @@
 import { Product, ProductStatus } from '@prisma/client';
-import { Counts } from '../../common/progress/progress';
+import { Counts } from '../../common/stats.service';
 import { UserRefDto, toUserRef } from '../../users/dto/user-response.dto';
 import { formatDateOnly } from '../../common/clock/today';
 

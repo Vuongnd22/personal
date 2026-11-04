@@ -1,4 +1,5 @@
-import { IsDateString, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsDateOnly } from '../../common/validation';
 
 export class CreateFeatureDto {
   @IsString()
@@ -18,10 +19,10 @@ export class CreateFeatureDto {
   ownerId?: string;
 
   @IsOptional()
-  @IsDateString()
+  @IsDateOnly()
   startDate?: string;
 
   @IsOptional()
-  @IsDateString()
+  @IsDateOnly()
   deadline?: string;
 }

@@ -1,4 +1,5 @@
-import { IsDateString, IsEnum, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsDateOnly } from '../../common/validation';
 import { TaskPriority, TaskStatus } from '@prisma/client';
 
 export class CreateTaskDto {
@@ -18,11 +19,11 @@ export class CreateTaskDto {
   assigneeId?: string;
 
   @IsOptional()
-  @IsDateString()
+  @IsDateOnly()
   startDate?: string;
 
   @IsOptional()
-  @IsDateString()
+  @IsDateOnly()
   deadline?: string;
 
   @IsOptional()

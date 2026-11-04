@@ -7,7 +7,7 @@ import { AppConfigService } from '../common/config/app-config';
 import { AuthUser } from '../auth/auth.types';
 import { toAttachmentDto, AttachmentDto } from './dto/attachment-response.dto';
 
-const MAX_SIZE_BYTES = 10 * 1024 * 1024;
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 @Injectable()
 export class AttachmentsService {
@@ -33,7 +33,7 @@ export class AttachmentsService {
     actor: AuthUser,
   ): Promise<AttachmentDto> {
     if (!file) throw new BadRequestException('file is required');
-    if (file.size > MAX_SIZE_BYTES) throw new BadRequestException('File exceeds the 10 MB limit');
+    if (file.size > MAX_ATTACHMENT_BYTES) throw new BadRequestException('File exceeds the 10 MB limit');
 
     const task = await this.prisma.task.findUnique({ where: { id: taskId }, include: { feature: true } });
     if (!task) throw new NotFoundException('Task not found');

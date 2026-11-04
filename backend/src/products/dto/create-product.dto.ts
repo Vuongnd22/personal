@@ -1,4 +1,5 @@
-import { IsDateString, IsEnum, IsHexColor, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsEnum, IsHexColor, IsOptional, IsString, IsUUID, MinLength } from 'class-validator';
+import { IsDateOnly } from '../../common/validation';
 import { ProductStatus } from '@prisma/client';
 
 export class CreateProductDto {
@@ -27,10 +28,10 @@ export class CreateProductDto {
   ownerId?: string;
 
   @IsOptional()
-  @IsDateString()
+  @IsDateOnly()
   startDate?: string;
 
   @IsOptional()
-  @IsDateString()
+  @IsDateOnly()
   deadline?: string;
 }

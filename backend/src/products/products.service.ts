@@ -1,95 +1,83 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { AppConfigService } from '../common/config/app-config';
+import { StatsService, EMPTY_COUNTS } from '../common/stats.service';
+import { dateInput } from '../common/clock/today';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { QueryProductsDto } from './dto/query-products.dto';
 import { toProductSummary, ProductSummaryDto } from './dto/product-response.dto';
-import { parseDateOnly } from '../common/clock/today';
-import { toCounts } from '../common/progress/progress';
+
+type ProductWithOwner = Prisma.ProductGetPayload<{ include: { owner: true; _count: { select: { features: true } } } }>;
+const INCLUDE = { owner: true, _count: { select: { features: true } } } as const;
 
 @Injectable()
 export class ProductsService {
   constructor(
     private prisma: PrismaService,
-    private appConfig: AppConfigService,
+    private stats: StatsService,
   ) {}
 
-  async findAll(query: QueryProductsDto): Promise<ProductSummaryDto[]> {
+  async findAll(query: QueryProductsDto = {}): Promise<ProductSummaryDto[]> {
     const where: Prisma.ProductWhereInput = {};
-    if (query.search) {
-      where.name = { contains: query.search, mode: 'insensitive' };
-    }
-    if (query.status) {
-      where.status = query.status;
-    }
+    if (query.search) where.name = { contains: query.search, mode: 'insensitive' };
+    if (query.status) where.status = query.status;
 
-    const products = await this.prisma.product.findMany({ where, include: { owner: true } });
-    const summaries = await Promise.all(products.map((p) => this.buildSummary(p)));
+    const products = await this.prisma.product.findMany({ where, include: INCLUDE });
+    const summaries = await this.summarize(products);
 
-    const sort = query.sort ?? 'updated';
-    const order = query.order ?? 'desc';
-    const dir = order === 'asc' ? 1 : -1;
-    summaries.sort((a, b) => {
-      switch (sort) {
-        case 'progress':
-          return (a.progress - b.progress) * dir;
-        case 'name':
-          return a.name.localeCompare(b.name) * dir;
-        case 'created':
-          return (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()) * dir;
-        case 'updated':
-        default:
-          return (new Date(a.lastActivityAt).getTime() - new Date(b.lastActivityAt).getTime()) * dir;
-      }
-    });
-    return summaries;
+    const dir = query.order === 'asc' ? 1 : -1;
+    const key: Record<string, (p: ProductSummaryDto) => number | string> = {
+      progress: (p) => p.progress,
+      name: (p) => p.name.toLocaleLowerCase(),
+      created: (p) => p.createdAt,
+      updated: (p) => p.lastActivityAt,
+    };
+    const pick = key[query.sort ?? 'updated'];
+    return summaries.sort((a, b) => (pick(a) < pick(b) ? -dir : pick(a) > pick(b) ? dir : 0));
   }
 
   async findOne(id: string): Promise<ProductSummaryDto> {
-    const product = await this.prisma.product.findUnique({ where: { id }, include: { owner: true } });
+    const product = await this.prisma.product.findUnique({ where: { id }, include: INCLUDE });
     if (!product) throw new NotFoundException('Product not found');
-    return this.buildSummary(product);
+    return (await this.summarize([product]))[0];
   }
 
   async create(dto: CreateProductDto): Promise<ProductSummaryDto> {
     const product = await this.prisma.product.create({
       data: {
-        name: dto.name,
+        name: dto.name.trim(),
         description: dto.description,
         icon: dto.icon,
         color: dto.color,
         status: dto.status,
-        ownerId: dto.ownerId,
-        startDate: dto.startDate ? parseDateOnly(dto.startDate) : undefined,
-        deadline: dto.deadline ? parseDateOnly(dto.deadline) : undefined,
+        ownerId: dto.ownerId ?? undefined,
+        startDate: dateInput(dto.startDate),
+        deadline: dateInput(dto.deadline),
       },
-      include: { owner: true },
+      include: INCLUDE,
     });
-    return this.buildSummary(product);
+    return (await this.summarize([product]))[0];
   }
 
   async update(id: string, dto: UpdateProductDto): Promise<ProductSummaryDto> {
-    if (Object.keys(dto).length === 0) {
-      throw new BadRequestException('No fields to update');
-    }
+    if (Object.keys(dto).length === 0) throw new BadRequestException('No fields to update');
     const product = await this.prisma.product.update({
       where: { id },
       data: {
-        name: dto.name,
+        name: dto.name?.trim(),
         description: dto.description,
         icon: dto.icon,
         color: dto.color,
         status: dto.status,
         ownerId: dto.ownerId,
-        startDate: dto.startDate !== undefined ? parseDateOnly(dto.startDate) : undefined,
-        deadline: dto.deadline !== undefined ? parseDateOnly(dto.deadline) : undefined,
+        startDate: dateInput(dto.startDate),
+        deadline: dateInput(dto.deadline),
         lastActivityAt: new Date(),
       },
-      include: { owner: true },
+      include: INCLUDE,
     });
-    return this.buildSummary(product);
+    return (await this.summarize([product]))[0];
   }
 
   async remove(id: string): Promise<{ ok: true }> {
@@ -97,22 +85,9 @@ export class ProductsService {
     return { ok: true };
   }
 
-  private async buildSummary(
-    product: Prisma.ProductGetPayload<{ include: { owner: true } }>,
-  ): Promise<ProductSummaryDto> {
-    const today = this.appConfig.today();
-    const [total, completed, overdue, featureCount] = await Promise.all([
-      this.prisma.task.count({ where: { feature: { productId: product.id } } }),
-      this.prisma.task.count({ where: { feature: { productId: product.id }, status: 'COMPLETED' } }),
-      this.prisma.task.count({
-        where: {
-          feature: { productId: product.id },
-          status: { not: 'COMPLETED' },
-          deadline: { lt: parseDateOnly(today) },
-        },
-      }),
-      this.prisma.feature.count({ where: { productId: product.id } }),
-    ]);
-    return toProductSummary(product, toCounts(total, completed, overdue), featureCount);
+  async summarize(products: ProductWithOwner[]): Promise<ProductSummaryDto[]> {
+    const tasks = await this.stats.liteTasks({ feature: { productId: { in: products.map((p) => p.id) } } });
+    const counts = this.stats.countsBy(tasks, 'productId');
+    return products.map((p) => toProductSummary(p, counts.get(p.id) ?? EMPTY_COUNTS, p._count.features));
   }
 }

@@ -4,7 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Task, TaskPriority, TaskStatus } from '@prisma/client';
+import { Prisma, TaskPriority, TaskStatus } from '@prisma/client';
+import { canDeleteTask, canUpdateTaskFields, completionPatch } from '../common/domain';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../common/config/app-config';
 import { CreateTaskDto } from './dto/create-task.dto';
@@ -78,18 +79,20 @@ export class TasksService {
     const feature = await this.prisma.feature.findUnique({ where: { id: dto.featureId } });
     if (!feature) throw new BadRequestException('featureId does not reference an existing feature');
 
+    const status = dto.status ?? 'TODO';
     const task = await this.prisma.$transaction(async (tx) => {
       const created = await tx.task.create({
         data: {
           featureId: dto.featureId,
-          title: dto.title,
+          title: dto.title.trim(),
           description: dto.description ?? '',
-          assigneeId: dto.assigneeId,
+          assigneeId: dto.assigneeId ?? undefined,
           creatorId: actor.id,
           startDate: dto.startDate ? parseDateOnly(dto.startDate) : undefined,
           deadline: dto.deadline ? parseDateOnly(dto.deadline) : undefined,
           priority: dto.priority,
-          status: dto.status,
+          status,
+          ...completionPatch('TODO', status, dto.deadline ?? null, this.appConfig.today(), new Date()),
         },
         include: TASK_INCLUDE,
       });
@@ -117,7 +120,10 @@ export class TasksService {
   async update(id: string, dto: UpdateTaskDto, actor: AuthUser) {
     const existing = await this.prisma.task.findUnique({ where: { id }, include: { feature: true } });
     if (!existing) throw new NotFoundException('Task not found');
-    this.assertCanEditTask(existing, actor);
+    const fields = Object.entries(dto).filter(([, v]) => v !== undefined).map(([k]) => k);
+    if (!canUpdateTaskFields(actor, existing, fields)) {
+      throw new ForbiddenException('You can only change the status of tasks assigned to you, or edit tasks you created');
+    }
 
     if (dto.featureId && dto.featureId !== existing.featureId) {
       const newFeature = await this.prisma.feature.findUnique({ where: { id: dto.featureId } });
@@ -183,19 +189,11 @@ export class TasksService {
       statusChanged = true;
       data.status = dto.status;
       historyEntries.push(this.historyRow(id, actor, 'status', existing.status, dto.status));
-      if (dto.status === 'COMPLETED') {
-        data.completedAt = new Date();
-        const deadlineForLateCheck = dto.deadline !== undefined ? (dto.deadline ? dto.deadline : null) : fmtD(existing.deadline);
-        data.completedLate = deadlineForLateCheck !== null && today > deadlineForLateCheck;
-      } else if (existing.status === 'COMPLETED') {
-        data.completedAt = null;
-        data.completedLate = false;
-      }
+      const deadline = dto.deadline !== undefined ? dto.deadline : fmtD(existing.deadline);
+      Object.assign(data, completionPatch(existing.status, dto.status, deadline, today, new Date()));
     }
 
-    if (Object.keys(data).length === 0) {
-      throw new BadRequestException('No fields to update');
-    }
+    if (Object.keys(data).length === 0) return this.findOne(id); // nothing actually changed
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const task = await tx.task.update({ where: { id }, data, include: TASK_INCLUDE });
@@ -238,19 +236,12 @@ export class TasksService {
   async remove(id: string, actor: AuthUser): Promise<{ ok: true }> {
     const existing = await this.prisma.task.findUnique({ where: { id }, include: { feature: true } });
     if (!existing) throw new NotFoundException('Task not found');
-    this.assertCanEditTask(existing, actor);
+    if (!canDeleteTask(actor, existing)) throw new ForbiddenException('Only the creator or a manager can delete this task');
     await this.prisma.$transaction(async (tx) => {
       await tx.task.delete({ where: { id } });
       await tx.product.update({ where: { id: existing.feature.productId }, data: { lastActivityAt: new Date() } });
     });
     return { ok: true };
-  }
-
-  assertCanEditTask(task: Task, actor: AuthUser): void {
-    if (actor.role === 'ADMIN' || actor.role === 'MANAGER') return;
-    if (task.creatorId === actor.id) return;
-    if (task.assigneeId === actor.id) return;
-    throw new ForbiddenException('You can only edit tasks you created or are assigned to');
   }
 
   private historyRow(
