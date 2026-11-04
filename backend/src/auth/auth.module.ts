@@ -1,10 +1,12 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 
+/** Global so every feature module can use JwtAuthGuard without re-importing JwtModule. */
+@Global()
 @Module({
   imports: [
     JwtModule.registerAsync({
@@ -17,6 +19,6 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtAuthGuard],
-  exports: [JwtAuthGuard, AuthService],
+  exports: [JwtModule, JwtAuthGuard, AuthService],
 })
 export class AuthModule {}
