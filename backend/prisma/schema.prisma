@@ -1,0 +1,289 @@
+// Contract for docs/spec.md §5. Adjust generator/datasource to the installed Prisma major version if needed;
+// do not change model semantics without noting why.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  MEMBER
+}
+
+enum ProductStatus {
+  PLANNING
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  ARCHIVED
+}
+
+// OVERDUE is derived (deadline < today && status != COMPLETED), never stored.
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  REVIEW
+  COMPLETED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum NodeKind {
+  PRODUCT
+  MODULE
+  NOTE
+}
+
+enum EdgeDirection {
+  FORWARD
+  BACKWARD
+  BOTH
+  NONE
+}
+
+enum NotificationType {
+  TASK_ASSIGNED
+  TASK_COMMENTED
+  TASK_STATUS_CHANGED
+  TASK_OVERDUE
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(MEMBER)
+  avatarColor  String   @default("#64748b")
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ownedProducts Product[]          @relation("ProductOwner")
+  ownedFeatures Feature[]          @relation("FeatureOwner")
+  assigned      Task[]             @relation("TaskAssignee")
+  created       Task[]             @relation("TaskCreator")
+  comments      TaskComment[]
+  attachments   TaskAttachment[]
+  history       TaskHistory[]
+  notifications Notification[]
+
+  @@map("users")
+}
+
+model Product {
+  id                    String        @id @default(uuid())
+  name                  String        @unique
+  description           String        @default("")
+  icon                  String        @default("box") // lucide icon name
+  color                 String        @default("#2563eb")
+  status                ProductStatus @default(ACTIVE)
+  ownerId               String?
+  owner                 User?         @relation("ProductOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  startDate             DateTime?     @db.Date
+  deadline              DateTime?     @db.Date
+  lastActivityAt        DateTime      @default(now())
+  architectureUpdatedAt DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  features      Feature[]
+  diagramNodes  ArchitectureNode[]       @relation("DiagramNodes")
+  referencedBy  ArchitectureNode[]       @relation("NodeRefProduct")
+  connections   ArchitectureConnection[]
+  notifications Notification[]
+
+  @@index([status])
+  @@map("products")
+}
+
+model Feature {
+  id          String    @id @default(uuid())
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name        String
+  description String    @default("")
+  category    String    @default("General")
+  ownerId     String?
+  owner       User?     @relation("FeatureOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  startDate   DateTime? @db.Date
+  deadline    DateTime? @db.Date
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tasks Task[]
+  nodes ArchitectureNode[]
+
+  @@unique([productId, name])
+  @@index([productId])
+  @@map("features")
+}
+
+model Task {
+  id                String       @id @default(uuid())
+  featureId         String
+  feature           Feature      @relation(fields: [featureId], references: [id], onDelete: Cascade)
+  title             String
+  description       String       @default("")
+  status            TaskStatus   @default(TODO)
+  priority          TaskPriority @default(MEDIUM)
+  assigneeId        String?
+  assignee          User?        @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  creatorId         String
+  creator           User         @relation("TaskCreator", fields: [creatorId], references: [id], onDelete: Restrict)
+  startDate         DateTime?    @db.Date
+  deadline          DateTime?    @db.Date
+  completedAt       DateTime?
+  completedLate     Boolean      @default(false)
+  overdueNotifiedAt DateTime?
+  sortOrder         Int          @default(0)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  checklistItems TaskChecklistItem[]
+  comments       TaskComment[]
+  attachments    TaskAttachment[]
+  history        TaskHistory[]
+  notifications  Notification[]
+
+  @@index([featureId, status])
+  @@index([assigneeId])
+  @@index([deadline])
+  @@index([completedAt])
+  @@map("tasks")
+}
+
+model TaskChecklistItem {
+  id        String   @id @default(uuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  title     String
+  done      Boolean  @default(false)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([taskId])
+  @@map("task_checklists")
+}
+
+model TaskComment {
+  id        String   @id @default(uuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  body      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([taskId, createdAt])
+  @@map("task_comments")
+}
+
+model TaskAttachment {
+  id         String   @id @default(uuid())
+  taskId     String
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploaderId String
+  uploader   User     @relation(fields: [uploaderId], references: [id], onDelete: Restrict)
+  fileName   String
+  mimeType   String
+  size       Int
+  storageKey String   @unique
+  createdAt  DateTime @default(now())
+
+  @@index([taskId])
+  @@map("task_attachments")
+}
+
+model TaskHistory {
+  id        String   @id @default(uuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actorId   String
+  actor     User     @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  action    String // CREATED | UPDATED | STATUS_CHANGED | ASSIGNED | CHECKLIST | COMMENTED | ATTACHMENT
+  field     String?
+  oldValue  String?
+  newValue  String?
+  createdAt DateTime @default(now())
+
+  @@index([taskId, createdAt])
+  @@map("task_history")
+}
+
+model ArchitectureNode {
+  id           String   @id // client-generated UUID so connections can reference unsaved nodes
+  productId    String // the diagram this node belongs to
+  product      Product  @relation("DiagramNodes", fields: [productId], references: [id], onDelete: Cascade)
+  kind         NodeKind
+  label        String   @default("") // ignored for PRODUCT nodes (product name is shown)
+  refProductId String?
+  refProduct   Product? @relation("NodeRefProduct", fields: [refProductId], references: [id], onDelete: Cascade)
+  featureId    String?
+  feature      Feature? @relation(fields: [featureId], references: [id], onDelete: SetNull)
+  positionX    Float
+  positionY    Float
+  width        Float?
+  height       Float?
+  isCenter     Boolean  @default(false)
+  color        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  outgoing ArchitectureConnection[] @relation("ConnSource")
+  incoming ArchitectureConnection[] @relation("ConnTarget")
+
+  @@unique([productId, refProductId])
+  @@index([productId])
+  @@map("architecture_nodes")
+}
+
+model ArchitectureConnection {
+  id           String           @id // client-generated UUID
+  productId    String
+  product      Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sourceNodeId String
+  source       ArchitectureNode @relation("ConnSource", fields: [sourceNodeId], references: [id], onDelete: Cascade)
+  targetNodeId String
+  target       ArchitectureNode @relation("ConnTarget", fields: [targetNodeId], references: [id], onDelete: Cascade)
+  sourceHandle String?
+  targetHandle String?
+  label        String           @default("")
+  direction    EdgeDirection    @default(FORWARD)
+  createdAt    DateTime         @default(now())
+
+  @@index([productId])
+  @@map("architecture_connections")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  body      String           @default("")
+  taskId    String?
+  task      Task?            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  productId String?
+  product   Product?         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  @@index([userId, readAt, createdAt])
+  @@map("notifications")
+}
