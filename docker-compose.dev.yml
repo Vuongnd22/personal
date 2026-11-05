@@ -1,0 +1,17 @@
+# For Docker users who'd rather not run embedded Postgres: `docker compose -f docker-compose.dev.yml up`,
+# then `DATABASE_URL=postgresql://archboard:archboard@localhost:5433/archboard npm run dev`.
+# Without Docker, `npm run dev` alone starts its own embedded Postgres instead — see README.md.
+services:
+  postgres:
+    image: postgres:17-alpine
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: archboard
+      POSTGRES_PASSWORD: archboard
+      POSTGRES_DB: archboard
+    volumes:
+      - dev-db-data:/var/lib/postgresql/data
+
+volumes:
+  dev-db-data:
